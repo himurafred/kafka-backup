@@ -1,6 +1,6 @@
 //! Kafka Fetch API implementation.
 
-use bytes::Bytes;
+use bytes::{Buf, Bytes};
 use kafka_protocol::messages::{
     ApiKey, BrokerId, FetchRequest, FetchResponse as KafkaFetchResponse, ListOffsetsRequest,
     TopicName,
@@ -124,14 +124,34 @@ pub async fn fetch(
     })
 }
 
-/// Decode records from raw bytes
+/// Decode records from raw bytes.
+///
+/// The Kafka Fetch response may contain a truncated record batch at the end
+/// when the response hits max_bytes. We decode batches in a loop and tolerate
+/// a decode error on the final (partial) batch.
 fn decode_records(data: &Bytes) -> Result<Vec<BackupRecord>> {
     let mut buf = data.clone();
+    let mut records = Vec::new();
 
-    let record_set = RecordBatchDecoder::decode(&mut buf)
-        .map_err(|e| KafkaError::Protocol(format!("Failed to decode records: {:?}", e)))?;
-
-    let records: Vec<BackupRecord> = record_set.records.iter().map(convert_record).collect();
+    while buf.has_remaining() {
+        match RecordBatchDecoder::decode(&mut buf) {
+            Ok(record_set) => {
+                for record in &record_set.records {
+                    records.push(convert_record(record));
+                }
+            }
+            Err(_) if !records.is_empty() => {
+                // Truncated trailing batch — safe to ignore since we already
+                // decoded at least one complete batch.
+                break;
+            }
+            Err(e) => {
+                return Err(
+                    KafkaError::Protocol(format!("Failed to decode records: {:?}", e)).into(),
+                );
+            }
+        }
+    }
 
     Ok(records)
 }
