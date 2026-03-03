@@ -8,7 +8,7 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'Dockerfile'
-      - '.github/workflows/test.yml'
+      - '.github/workflows/**'
   pull_request:
     branches: [main]
     paths:
@@ -16,7 +16,7 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'Dockerfile'
-      - '.github/workflows/test.yml'
+      - '.github/workflows/**'
 
 env:
   CARGO_TERM_COLOR: always

@@ -10,6 +10,7 @@ version = "0.9.0"
 edition = "2021"
 license = "MIT"
 authors = ["OSO"]
+description = "High-performance Kafka backup and restore tool with PITR support"
 repository = "https://github.com/osodevops/kafka-backup"
 homepage = "https://github.com/osodevops/kafka-backup"
 
