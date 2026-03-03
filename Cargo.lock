@@ -1190,7 +1190,7 @@ dependencies = [
 
 [[package]]
 name = "kafka-backup-cli"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1207,7 +1207,7 @@ dependencies = [
 
 [[package]]
 name = "kafka-backup-core"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1226,6 +1226,7 @@ dependencies = [
  "parking_lot",
  "prometheus-client",
  "regex",
+ "ring",
  "rustls",
  "rustls-pemfile",
  "serde",
