@@ -223,11 +223,14 @@ impl KafkaClient {
                 )
                 .await
             }
-            Some(SaslMechanism::ScramSha256) | Some(SaslMechanism::ScramSha512) => {
-                // SCRAM authentication would go here
-                Err(crate::Error::Authentication(
-                    "SCRAM authentication not yet implemented".to_string(),
-                ))
+            Some(mechanism @ SaslMechanism::ScramSha256)
+            | Some(mechanism @ SaslMechanism::ScramSha512) => {
+                self.sasl_scram_auth(
+                    security.sasl_username.as_deref().unwrap_or(""),
+                    security.sasl_password.as_deref().unwrap_or(""),
+                    mechanism,
+                )
+                .await
             }
             None => Ok(()), // No authentication needed
         }
@@ -267,6 +270,79 @@ impl KafkaClient {
         }
 
         debug!("SASL PLAIN authentication successful");
+        Ok(())
+    }
+
+    /// SCRAM-SHA-256/512 authentication using send_request (with auto-reconnect).
+    async fn sasl_scram_auth(
+        &self,
+        username: &str,
+        password: &str,
+        mechanism: SaslMechanism,
+    ) -> Result<()> {
+        use kafka_protocol::messages::{SaslAuthenticateRequest, SaslHandshakeRequest};
+        use super::scram::{ScramAlgorithm, ScramClient};
+
+        let algorithm = ScramAlgorithm::from_mechanism(mechanism).ok_or_else(|| {
+            crate::Error::Authentication(format!(
+                "Unsupported SCRAM mechanism: {:?}",
+                mechanism
+            ))
+        })?;
+
+        // Step 1: SASL Handshake
+        let handshake_request =
+            SaslHandshakeRequest::default().with_mechanism(algorithm.mechanism_name().into());
+        let _handshake_response: kafka_protocol::messages::SaslHandshakeResponse =
+            self.send_request(ApiKey::SaslHandshake, handshake_request).await?;
+
+        // Step 2: Client-first message
+        let mut scram_client = ScramClient::new(algorithm, username, password)?;
+        let client_first = scram_client.client_first_message();
+
+        let auth_request =
+            SaslAuthenticateRequest::default().with_auth_bytes(Bytes::from(client_first));
+        let server_first_response: kafka_protocol::messages::SaslAuthenticateResponse =
+            self.send_request(ApiKey::SaslAuthenticate, auth_request).await?;
+
+        if server_first_response.error_code != 0 {
+            return Err(crate::Error::Authentication(format!(
+                "SCRAM handshake failed: {}",
+                server_first_response
+                    .error_message
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("error code {}", server_first_response.error_code))
+            )));
+        }
+
+        // Step 3: Process server-first, send client-final
+        let client_final =
+            scram_client.process_server_first(&server_first_response.auth_bytes)?;
+
+        let auth_request =
+            SaslAuthenticateRequest::default().with_auth_bytes(Bytes::from(client_final));
+        let server_final_response: kafka_protocol::messages::SaslAuthenticateResponse =
+            self.send_request(ApiKey::SaslAuthenticate, auth_request).await?;
+
+        if server_final_response.error_code != 0 {
+            return Err(crate::Error::Authentication(format!(
+                "SCRAM authentication failed: {}",
+                server_final_response
+                    .error_message
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| {
+                        format!("error code {}", server_final_response.error_code)
+                    })
+            )));
+        }
+
+        // Step 4: Verify server signature
+        scram_client.process_server_final(&server_final_response.auth_bytes)?;
+
+        debug!(
+            "SASL {} authentication successful",
+            algorithm.mechanism_name()
+        );
         Ok(())
     }
 
@@ -379,10 +455,14 @@ impl KafkaClient {
                 )
                 .await
             }
-            Some(SaslMechanism::ScramSha256) | Some(SaslMechanism::ScramSha512) => {
-                Err(crate::Error::Authentication(
-                    "SCRAM authentication not yet implemented".to_string(),
-                ))
+            Some(mechanism @ SaslMechanism::ScramSha256)
+            | Some(mechanism @ SaslMechanism::ScramSha512) => {
+                self.sasl_scram_auth_raw(
+                    security.sasl_username.as_deref().unwrap_or(""),
+                    security.sasl_password.as_deref().unwrap_or(""),
+                    mechanism,
+                )
+                .await
             }
             None => Ok(()),
         }
@@ -423,6 +503,82 @@ impl KafkaClient {
         }
 
         debug!("SASL PLAIN re-authentication successful");
+        Ok(())
+    }
+
+    /// SCRAM-SHA-256/512 authentication using raw requests (no reconnect retry).
+    async fn sasl_scram_auth_raw(
+        &self,
+        username: &str,
+        password: &str,
+        mechanism: SaslMechanism,
+    ) -> Result<()> {
+        use kafka_protocol::messages::{SaslAuthenticateRequest, SaslHandshakeRequest};
+        use super::scram::{ScramAlgorithm, ScramClient};
+
+        let algorithm = ScramAlgorithm::from_mechanism(mechanism).ok_or_else(|| {
+            crate::Error::Authentication(format!(
+                "Unsupported SCRAM mechanism: {:?}",
+                mechanism
+            ))
+        })?;
+
+        // Step 1: SASL Handshake
+        let handshake_request =
+            SaslHandshakeRequest::default().with_mechanism(algorithm.mechanism_name().into());
+        let buf = self.encode_request(ApiKey::SaslHandshake, &handshake_request)?;
+        let _handshake_response: kafka_protocol::messages::SaslHandshakeResponse =
+            self.send_raw_request(ApiKey::SaslHandshake, &buf).await?;
+
+        // Step 2: Client-first message
+        let mut scram_client = ScramClient::new(algorithm, username, password)?;
+        let client_first = scram_client.client_first_message();
+
+        let auth_request =
+            SaslAuthenticateRequest::default().with_auth_bytes(Bytes::from(client_first));
+        let buf = self.encode_request(ApiKey::SaslAuthenticate, &auth_request)?;
+        let server_first_response: kafka_protocol::messages::SaslAuthenticateResponse =
+            self.send_raw_request(ApiKey::SaslAuthenticate, &buf).await?;
+
+        if server_first_response.error_code != 0 {
+            return Err(crate::Error::Authentication(format!(
+                "SCRAM handshake failed: {}",
+                server_first_response
+                    .error_message
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("error code {}", server_first_response.error_code))
+            )));
+        }
+
+        // Step 3: Process server-first, send client-final
+        let client_final =
+            scram_client.process_server_first(&server_first_response.auth_bytes)?;
+
+        let auth_request =
+            SaslAuthenticateRequest::default().with_auth_bytes(Bytes::from(client_final));
+        let buf = self.encode_request(ApiKey::SaslAuthenticate, &auth_request)?;
+        let server_final_response: kafka_protocol::messages::SaslAuthenticateResponse =
+            self.send_raw_request(ApiKey::SaslAuthenticate, &buf).await?;
+
+        if server_final_response.error_code != 0 {
+            return Err(crate::Error::Authentication(format!(
+                "SCRAM authentication failed: {}",
+                server_final_response
+                    .error_message
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| {
+                        format!("error code {}", server_final_response.error_code)
+                    })
+            )));
+        }
+
+        // Step 4: Verify server signature
+        scram_client.process_server_final(&server_final_response.auth_bytes)?;
+
+        debug!(
+            "SASL {} re-authentication successful",
+            algorithm.mechanism_name()
+        );
         Ok(())
     }
 
