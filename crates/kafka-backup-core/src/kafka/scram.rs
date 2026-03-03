@@ -92,24 +92,17 @@ fn parse_server_first(msg: &str) -> Result<(String, Vec<u8>, NonZeroU32), crate:
     })?;
 
     let salt = BASE64
-        .decode(
-            salt_b64.ok_or_else(|| {
-                crate::Error::Authentication(
-                    "Missing salt (s=) in server-first message".to_string(),
-                )
-            })?,
-        )
+        .decode(salt_b64.ok_or_else(|| {
+            crate::Error::Authentication("Missing salt (s=) in server-first message".to_string())
+        })?)
         .map_err(|e| crate::Error::Authentication(format!("Invalid base64 salt: {}", e)))?;
 
     let iter_count = iterations.ok_or_else(|| {
-        crate::Error::Authentication(
-            "Missing iterations (i=) in server-first message".to_string(),
-        )
+        crate::Error::Authentication("Missing iterations (i=) in server-first message".to_string())
     })?;
 
-    let iter_count = NonZeroU32::new(iter_count).ok_or_else(|| {
-        crate::Error::Authentication("Iteration count must be > 0".to_string())
-    })?;
+    let iter_count = NonZeroU32::new(iter_count)
+        .ok_or_else(|| crate::Error::Authentication("Iteration count must be > 0".to_string()))?;
 
     Ok((nonce, salt, iter_count))
 }
@@ -118,9 +111,8 @@ fn parse_server_first(msg: &str) -> Result<(String, Vec<u8>, NonZeroU32), crate:
 fn generate_nonce() -> Result<String, crate::Error> {
     let rng = rand::SystemRandom::new();
     let mut nonce_bytes = [0u8; 24];
-    rng.fill(&mut nonce_bytes).map_err(|_| {
-        crate::Error::Authentication("Failed to generate random nonce".to_string())
-    })?;
+    rng.fill(&mut nonce_bytes)
+        .map_err(|_| crate::Error::Authentication("Failed to generate random nonce".to_string()))?;
     Ok(BASE64.encode(nonce_bytes))
 }
 
@@ -238,10 +230,7 @@ impl ScramClient {
         server_first_bytes: &[u8],
     ) -> Result<Vec<u8>, crate::Error> {
         let server_first = std::str::from_utf8(server_first_bytes).map_err(|e| {
-            crate::Error::Authentication(format!(
-                "Server-first message is not valid UTF-8: {}",
-                e
-            ))
+            crate::Error::Authentication(format!("Server-first message is not valid UTF-8: {}", e))
         })?;
 
         let (server_nonce, salt, iterations) = parse_server_first(server_first)?;
@@ -286,15 +275,9 @@ impl ScramClient {
 
     /// Verify the server-final message.
     /// Server-final format: `v=<server-signature-base64>` or `e=<error>`
-    pub fn process_server_final(
-        &self,
-        server_final_bytes: &[u8],
-    ) -> Result<(), crate::Error> {
+    pub fn process_server_final(&self, server_final_bytes: &[u8]) -> Result<(), crate::Error> {
         let server_final = std::str::from_utf8(server_final_bytes).map_err(|e| {
-            crate::Error::Authentication(format!(
-                "Server-final message is not valid UTF-8: {}",
-                e
-            ))
+            crate::Error::Authentication(format!("Server-final message is not valid UTF-8: {}", e))
         })?;
 
         if let Some(error) = server_final.strip_prefix("e=") {
@@ -316,24 +299,17 @@ impl ScramClient {
         })?;
 
         let server_key = self.server_key.as_ref().ok_or_else(|| {
-            crate::Error::Authentication(
-                "process_server_first was not called".to_string(),
-            )
+            crate::Error::Authentication("process_server_first was not called".to_string())
         })?;
 
         let auth_message = self.auth_message.as_ref().ok_or_else(|| {
-            crate::Error::Authentication(
-                "process_server_first was not called".to_string(),
-            )
+            crate::Error::Authentication("process_server_first was not called".to_string())
         })?;
 
         // Verify using ring's constant-time HMAC verification
-        hmac::verify(server_key, auth_message.as_bytes(), &server_signature)
-            .map_err(|_| {
-                crate::Error::Authentication(
-                    "Server signature verification failed".to_string(),
-                )
-            })?;
+        hmac::verify(server_key, auth_message.as_bytes(), &server_signature).map_err(|_| {
+            crate::Error::Authentication("Server signature verification failed".to_string())
+        })?;
 
         Ok(())
     }
@@ -413,39 +389,27 @@ mod tests {
 
     #[test]
     fn test_username_escaping() {
-        let client =
-            ScramClient::new(ScramAlgorithm::Sha512, "us=er,name", "pass").unwrap();
+        let client = ScramClient::new(ScramAlgorithm::Sha512, "us=er,name", "pass").unwrap();
         let msg = String::from_utf8(client.client_first_message()).unwrap();
         assert!(msg.contains("n=us=3Der=2Cname"));
     }
 
     #[test]
     fn test_nonce_validation_rejects_bad_server_nonce() {
-        let mut client =
-            ScramClient::new(ScramAlgorithm::Sha256, "user", "pass").unwrap();
-        let bad_server_first = format!(
-            "r=WRONG{},s={},i=4096",
-            "extra",
-            BASE64.encode(b"somesalt")
-        );
+        let mut client = ScramClient::new(ScramAlgorithm::Sha256, "user", "pass").unwrap();
+        let bad_server_first =
+            format!("r=WRONG{},s={},i=4096", "extra", BASE64.encode(b"somesalt"));
         let result = client.process_server_first(bad_server_first.as_bytes());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("client nonce"));
+        assert!(result.unwrap_err().to_string().contains("client nonce"));
     }
 
     #[test]
     fn test_server_error_response() {
-        let client =
-            ScramClient::new(ScramAlgorithm::Sha256, "user", "pass").unwrap();
+        let client = ScramClient::new(ScramAlgorithm::Sha256, "user", "pass").unwrap();
         let result = client.process_server_final(b"e=invalid-encoding");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("invalid-encoding"));
+        assert!(result.unwrap_err().to_string().contains("invalid-encoding"));
     }
 
     /// Simulate both client and server sides of a SCRAM handshake
@@ -473,8 +437,9 @@ mod tests {
         let server_first = format!("r={},s={},i={}", server_nonce, salt_b64, iterations);
 
         // --- Client: process server-first, produce client-final ---
-        let client_final_bytes =
-            client.process_server_first(server_first.as_bytes()).unwrap();
+        let client_final_bytes = client
+            .process_server_first(server_first.as_bytes())
+            .unwrap();
         let client_final = String::from_utf8(client_final_bytes).unwrap();
 
         // Extract proof from client-final
@@ -487,13 +452,10 @@ mod tests {
         let proof = BASE64.decode(proof_b64).unwrap();
 
         // --- Server: verify client proof ---
-        let salted_password =
-            derive_salted_password(&algorithm, password, salt, iterations);
-        let salted_key =
-            hmac::Key::new(algorithm.hmac_algorithm(), &salted_password);
+        let salted_password = derive_salted_password(&algorithm, password, salt, iterations);
+        let salted_key = hmac::Key::new(algorithm.hmac_algorithm(), &salted_password);
         let client_key_tag = hmac::sign(&salted_key, b"Client Key");
-        let stored_key =
-            digest::digest(algorithm.digest_algorithm(), client_key_tag.as_ref());
+        let stored_key = digest::digest(algorithm.digest_algorithm(), client_key_tag.as_ref());
 
         let client_final_without_proof = format!("c=biws,r={}", server_nonce);
         let auth_message = format!(
@@ -501,10 +463,8 @@ mod tests {
             client_first_bare, server_first, client_final_without_proof
         );
 
-        let stored_key_hmac =
-            hmac::Key::new(algorithm.hmac_algorithm(), stored_key.as_ref());
-        let client_signature =
-            hmac::sign(&stored_key_hmac, auth_message.as_bytes());
+        let stored_key_hmac = hmac::Key::new(algorithm.hmac_algorithm(), stored_key.as_ref());
+        let client_signature = hmac::sign(&stored_key_hmac, auth_message.as_bytes());
 
         // Reconstruct ClientKey = ClientProof XOR ClientSignature
         let reconstructed_client_key: Vec<u8> = proof
@@ -520,12 +480,9 @@ mod tests {
 
         // --- Server: produce server-final ---
         let server_key_tag = hmac::sign(&salted_key, b"Server Key");
-        let server_key_hmac =
-            hmac::Key::new(algorithm.hmac_algorithm(), server_key_tag.as_ref());
-        let server_signature =
-            hmac::sign(&server_key_hmac, auth_message.as_bytes());
-        let server_final =
-            format!("v={}", BASE64.encode(server_signature.as_ref()));
+        let server_key_hmac = hmac::Key::new(algorithm.hmac_algorithm(), server_key_tag.as_ref());
+        let server_signature = hmac::sign(&server_key_hmac, auth_message.as_bytes());
+        let server_final = format!("v={}", BASE64.encode(server_signature.as_ref()));
 
         // --- Client: verify server-final ---
         client
@@ -549,12 +506,9 @@ mod tests {
         let salt = b"test_salt_bytes!";
         let iterations = NonZeroU32::new(4096).unwrap();
 
-        let mut client =
-            ScramClient::new(algorithm, "user", "pencil").unwrap();
+        let mut client = ScramClient::new(algorithm, "user", "pencil").unwrap();
         let client_first = String::from_utf8(client.client_first_message()).unwrap();
-        let client_nonce = client_first
-            .strip_prefix("n,,n=user,r=")
-            .unwrap();
+        let client_nonce = client_first.strip_prefix("n,,n=user,r=").unwrap();
 
         let server_nonce = format!("{}Server", client_nonce);
         let server_first = format!(
@@ -564,7 +518,9 @@ mod tests {
             iterations
         );
 
-        let _ = client.process_server_first(server_first.as_bytes()).unwrap();
+        let _ = client
+            .process_server_first(server_first.as_bytes())
+            .unwrap();
 
         // Wrong server signature
         let wrong_sig = BASE64.encode(b"this is definitely wrong signature!!");

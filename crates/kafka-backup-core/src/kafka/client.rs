@@ -280,21 +280,19 @@ impl KafkaClient {
         password: &str,
         mechanism: SaslMechanism,
     ) -> Result<()> {
-        use kafka_protocol::messages::{SaslAuthenticateRequest, SaslHandshakeRequest};
         use super::scram::{ScramAlgorithm, ScramClient};
+        use kafka_protocol::messages::{SaslAuthenticateRequest, SaslHandshakeRequest};
 
         let algorithm = ScramAlgorithm::from_mechanism(mechanism).ok_or_else(|| {
-            crate::Error::Authentication(format!(
-                "Unsupported SCRAM mechanism: {:?}",
-                mechanism
-            ))
+            crate::Error::Authentication(format!("Unsupported SCRAM mechanism: {:?}", mechanism))
         })?;
 
         // Step 1: SASL Handshake
         let handshake_request =
             SaslHandshakeRequest::default().with_mechanism(algorithm.mechanism_name().into());
-        let _handshake_response: kafka_protocol::messages::SaslHandshakeResponse =
-            self.send_request(ApiKey::SaslHandshake, handshake_request).await?;
+        let _handshake_response: kafka_protocol::messages::SaslHandshakeResponse = self
+            .send_request(ApiKey::SaslHandshake, handshake_request)
+            .await?;
 
         // Step 2: Client-first message
         let mut scram_client = ScramClient::new(algorithm, username, password)?;
@@ -302,8 +300,9 @@ impl KafkaClient {
 
         let auth_request =
             SaslAuthenticateRequest::default().with_auth_bytes(Bytes::from(client_first));
-        let server_first_response: kafka_protocol::messages::SaslAuthenticateResponse =
-            self.send_request(ApiKey::SaslAuthenticate, auth_request).await?;
+        let server_first_response: kafka_protocol::messages::SaslAuthenticateResponse = self
+            .send_request(ApiKey::SaslAuthenticate, auth_request)
+            .await?;
 
         if server_first_response.error_code != 0 {
             return Err(crate::Error::Authentication(format!(
@@ -316,13 +315,13 @@ impl KafkaClient {
         }
 
         // Step 3: Process server-first, send client-final
-        let client_final =
-            scram_client.process_server_first(&server_first_response.auth_bytes)?;
+        let client_final = scram_client.process_server_first(&server_first_response.auth_bytes)?;
 
         let auth_request =
             SaslAuthenticateRequest::default().with_auth_bytes(Bytes::from(client_final));
-        let server_final_response: kafka_protocol::messages::SaslAuthenticateResponse =
-            self.send_request(ApiKey::SaslAuthenticate, auth_request).await?;
+        let server_final_response: kafka_protocol::messages::SaslAuthenticateResponse = self
+            .send_request(ApiKey::SaslAuthenticate, auth_request)
+            .await?;
 
         if server_final_response.error_code != 0 {
             return Err(crate::Error::Authentication(format!(
@@ -513,14 +512,11 @@ impl KafkaClient {
         password: &str,
         mechanism: SaslMechanism,
     ) -> Result<()> {
-        use kafka_protocol::messages::{SaslAuthenticateRequest, SaslHandshakeRequest};
         use super::scram::{ScramAlgorithm, ScramClient};
+        use kafka_protocol::messages::{SaslAuthenticateRequest, SaslHandshakeRequest};
 
         let algorithm = ScramAlgorithm::from_mechanism(mechanism).ok_or_else(|| {
-            crate::Error::Authentication(format!(
-                "Unsupported SCRAM mechanism: {:?}",
-                mechanism
-            ))
+            crate::Error::Authentication(format!("Unsupported SCRAM mechanism: {:?}", mechanism))
         })?;
 
         // Step 1: SASL Handshake
@@ -537,8 +533,9 @@ impl KafkaClient {
         let auth_request =
             SaslAuthenticateRequest::default().with_auth_bytes(Bytes::from(client_first));
         let buf = self.encode_request(ApiKey::SaslAuthenticate, &auth_request)?;
-        let server_first_response: kafka_protocol::messages::SaslAuthenticateResponse =
-            self.send_raw_request(ApiKey::SaslAuthenticate, &buf).await?;
+        let server_first_response: kafka_protocol::messages::SaslAuthenticateResponse = self
+            .send_raw_request(ApiKey::SaslAuthenticate, &buf)
+            .await?;
 
         if server_first_response.error_code != 0 {
             return Err(crate::Error::Authentication(format!(
@@ -551,14 +548,14 @@ impl KafkaClient {
         }
 
         // Step 3: Process server-first, send client-final
-        let client_final =
-            scram_client.process_server_first(&server_first_response.auth_bytes)?;
+        let client_final = scram_client.process_server_first(&server_first_response.auth_bytes)?;
 
         let auth_request =
             SaslAuthenticateRequest::default().with_auth_bytes(Bytes::from(client_final));
         let buf = self.encode_request(ApiKey::SaslAuthenticate, &auth_request)?;
-        let server_final_response: kafka_protocol::messages::SaslAuthenticateResponse =
-            self.send_raw_request(ApiKey::SaslAuthenticate, &buf).await?;
+        let server_final_response: kafka_protocol::messages::SaslAuthenticateResponse = self
+            .send_raw_request(ApiKey::SaslAuthenticate, &buf)
+            .await?;
 
         if server_final_response.error_code != 0 {
             return Err(crate::Error::Authentication(format!(
