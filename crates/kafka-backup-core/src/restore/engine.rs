@@ -666,6 +666,39 @@ impl RestoreEngine {
             .cloned()
             .unwrap_or_else(|| topic_backup.name.clone());
 
+        // Repartitioning branch: delegate to fan-out module
+        if let Some(repart_config) = options.repartitioning.get(&target_topic) {
+            info!(
+                "Repartitioning topic {} -> {} ({} source -> {} target partitions)",
+                topic_backup.name,
+                target_topic,
+                topic_backup.partitions.len(),
+                repart_config.target_partitions,
+            );
+
+            let router = self
+                .router
+                .read()
+                .await
+                .clone()
+                .ok_or_else(|| Error::Config("Router not initialized".to_string()))?;
+
+            return super::repartition::restore_topic_repartitioned(
+                topic_backup,
+                &target_topic,
+                repart_config,
+                options,
+                router,
+                self.storage.clone(),
+                Arc::clone(&self.metrics),
+                Arc::clone(&self.health),
+                Arc::clone(&self.kafka_circuit_breaker),
+                Arc::clone(&self.storage_circuit_breaker),
+                Arc::clone(&self.checkpoint),
+            )
+            .await;
+        }
+
         info!(
             "Restoring topic {} -> {} ({} partitions)",
             topic_backup.name,
@@ -834,14 +867,20 @@ impl RestoreEngine {
                 .cloned()
                 .unwrap_or_else(|| topic_backup.name.clone());
 
-            // Calculate partition count (max partition_id + 1)
-            let partition_count = topic_backup
-                .partitions
-                .iter()
-                .map(|p| p.partition_id)
-                .max()
-                .map(|max_id| max_id + 1)
-                .unwrap_or(1);
+            // Use repartitioning target_partitions when configured,
+            // otherwise fall back to source partition count
+            let partition_count =
+                if let Some(repart) = options.repartitioning.get(&target_name) {
+                    repart.target_partitions
+                } else {
+                    topic_backup
+                        .partitions
+                        .iter()
+                        .map(|p| p.partition_id)
+                        .max()
+                        .map(|max_id| max_id + 1)
+                        .unwrap_or(1)
+                };
 
             target_topics
                 .entry(target_name)
