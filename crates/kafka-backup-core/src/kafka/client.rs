@@ -683,6 +683,10 @@ impl KafkaClient {
             ApiKey::ApiVersions => 3,
             ApiKey::ListOffsets => 5,
             ApiKey::CreateTopics => 5, // v5 supported since Kafka 2.4
+            ApiKey::FindCoordinator => 2,
+            ApiKey::OffsetFetch => 5,
+            ApiKey::OffsetCommit => 5,
+            ApiKey::ListGroups => 2,
             _ => 0,
         }
     }
