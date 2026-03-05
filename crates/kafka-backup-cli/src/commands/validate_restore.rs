@@ -45,6 +45,23 @@ pub async fn run(config_path: &str, format: &str) -> Result<()> {
     Ok(())
 }
 
+/// A line in the box report, either left-aligned or centered
+enum BoxLine {
+    Left(String),
+    Centered(String),
+    Separator,
+}
+
+impl BoxLine {
+    fn content_width(&self) -> usize {
+        match self {
+            BoxLine::Left(s) => s.chars().count(),
+            BoxLine::Centered(s) => s.chars().count(),
+            BoxLine::Separator => 0,
+        }
+    }
+}
+
 fn print_validation_report(report: &kafka_backup_core::manifest::DryRunReport) {
     // Collect all content lines first, then size the box to fit
     let status = if report.valid && report.errors.is_empty() {
@@ -53,36 +70,36 @@ fn print_validation_report(report: &kafka_backup_core::manifest::DryRunReport) {
         "✗ INVALID"
     };
 
-    let mut sections: Vec<Vec<String>> = Vec::new();
+    let mut sections: Vec<Vec<BoxLine>> = Vec::new();
 
     // Header
-    sections.push(vec![center("RESTORE VALIDATION REPORT")]);
+    sections.push(vec![BoxLine::Centered("RESTORE VALIDATION REPORT".into())]);
 
     // Status
     sections.push(vec![
-        kv("Status", status),
-        kv("Backup ID", &report.backup_id),
+        BoxLine::Left(kv("Status", status)),
+        BoxLine::Left(kv("Backup ID", &report.backup_id)),
     ]);
 
     // Summary
     {
-        let mut lines = vec![center("RESTORE SUMMARY")];
-        lines.push(kv(
+        let mut lines = vec![BoxLine::Centered("RESTORE SUMMARY".into())];
+        lines.push(BoxLine::Left(kv(
             "Topics to restore",
             &report.topics_to_restore.len().to_string(),
-        ));
-        lines.push(kv(
+        )));
+        lines.push(BoxLine::Left(kv(
             "Segments to process",
             &report.segments_to_process.to_string(),
-        ));
-        lines.push(kv(
+        )));
+        lines.push(BoxLine::Left(kv(
             "Records to restore",
             &report.records_to_restore.to_string(),
-        ));
-        lines.push(kv(
+        )));
+        lines.push(BoxLine::Left(kv(
             "Bytes to restore",
             &format_bytes(report.bytes_to_restore),
-        ));
+        )));
         sections.push(lines);
     }
 
@@ -94,28 +111,33 @@ fn print_validation_report(report: &kafka_backup_core::manifest::DryRunReport) {
                 .unwrap_or_else(|| "Unknown".to_string())
         };
         sections.push(vec![
-            center("TIME RANGE"),
-            format!("From: {}", fmt(start)),
-            format!("To:   {}", fmt(end)),
+            BoxLine::Centered("TIME RANGE".into()),
+            BoxLine::Left(format!("From: {}", fmt(start))),
+            BoxLine::Left(format!("To:   {}", fmt(end))),
         ]);
     }
 
     // Topics
     if !report.topics_to_restore.is_empty() {
-        let mut lines = vec![center("TOPICS TO RESTORE")];
-        for topic in &report.topics_to_restore {
-            lines.push(String::new());
-            lines.push(format!("{} -> {}", topic.source_topic, topic.target_topic));
+        let mut lines = vec![BoxLine::Centered("TOPICS TO RESTORE".into())];
+        for (idx, topic) in report.topics_to_restore.iter().enumerate() {
+            if idx > 0 {
+                lines.push(BoxLine::Separator);
+            }
+            lines.push(BoxLine::Left(format!(
+                "{} -> {}",
+                topic.source_topic, topic.target_topic
+            )));
 
             if let Some(ref repart) = topic.repartitioning {
-                lines.push(format!(
+                lines.push(BoxLine::Left(format!(
                     "  Repartitioning: {} partitions -> {} partitions ({} strategy)",
                     repart.source_partitions, repart.target_partitions, repart.strategy
-                ));
+                )));
             }
 
             for p in &topic.partitions {
-                lines.push(format!(
+                lines.push(BoxLine::Left(format!(
                     "  P{} -> P{}: {} records, offsets {}-{} ({} segments)",
                     p.source_partition,
                     p.target_partition,
@@ -123,7 +145,7 @@ fn print_validation_report(report: &kafka_backup_core::manifest::DryRunReport) {
                     p.offset_range.0,
                     p.offset_range.1,
                     p.segments
-                ));
+                )));
             }
         }
         sections.push(lines);
@@ -131,27 +153,27 @@ fn print_validation_report(report: &kafka_backup_core::manifest::DryRunReport) {
 
     // Consumer offset actions
     if !report.consumer_offset_actions.is_empty() {
-        let mut lines = vec![center("CONSUMER OFFSET ACTIONS")];
+        let mut lines = vec![BoxLine::Centered("CONSUMER OFFSET ACTIONS".into())];
         for action in &report.consumer_offset_actions {
-            lines.push(format!("* {}", action));
+            lines.push(BoxLine::Left(format!("* {}", action)));
         }
         sections.push(lines);
     }
 
     // Errors
     if !report.errors.is_empty() {
-        let mut lines = vec![center("ERRORS")];
+        let mut lines = vec![BoxLine::Centered("ERRORS".into())];
         for error in &report.errors {
-            lines.push(format!("✗ {}", error));
+            lines.push(BoxLine::Left(format!("✗ {}", error)));
         }
         sections.push(lines);
     }
 
     // Warnings
     if !report.warnings.is_empty() {
-        let mut lines = vec![center("WARNINGS")];
+        let mut lines = vec![BoxLine::Centered("WARNINGS".into())];
         for warning in &report.warnings {
-            lines.push(format!("⚠ {}", warning));
+            lines.push(BoxLine::Left(format!("⚠ {}", warning)));
         }
         sections.push(lines);
     }
@@ -160,10 +182,7 @@ fn print_validation_report(report: &kafka_backup_core::manifest::DryRunReport) {
     let max_content = sections
         .iter()
         .flat_map(|s| s.iter())
-        .map(|l| {
-            let visible = l.strip_prefix('\x01').unwrap_or(l.as_str());
-            visible.chars().count()
-        })
+        .map(|l| l.content_width())
         .max()
         .unwrap_or(0);
     let w = max_content.max(60) + 4; // 2 spaces padding on each side
@@ -175,25 +194,25 @@ fn print_validation_report(report: &kafka_backup_core::manifest::DryRunReport) {
             println!("╠{}╣", "═".repeat(w));
         }
         for line in section {
-            if let Some(text) = line.strip_prefix('\x01') {
-                // Centered line
-                let text_len = text.chars().count();
-                let left = (w - text_len) / 2;
-                let right = w - text_len - left;
-                println!("║{}{}{}║", " ".repeat(left), text, " ".repeat(right));
-            } else {
-                let chars = line.chars().count();
-                let pad = w - chars - 2;
-                println!("║ {}{}║", line, " ".repeat(pad + 1));
+            match line {
+                BoxLine::Centered(text) => {
+                    let text_len = text.chars().count();
+                    let left = (w - text_len) / 2;
+                    let right = w - text_len - left;
+                    println!("║{}{}{}║", " ".repeat(left), text, " ".repeat(right));
+                }
+                BoxLine::Left(text) => {
+                    let chars = text.chars().count();
+                    let pad = w - chars - 2;
+                    println!("║ {}{}║", text, " ".repeat(pad + 1));
+                }
+                BoxLine::Separator => {
+                    println!("║ {}║", "─".repeat(w - 2));
+                }
             }
         }
     }
     println!("╚{}╝", "═".repeat(w));
-}
-
-/// Mark a string for centering in the box
-fn center(s: &str) -> String {
-    format!("\x01{}", s)
 }
 
 /// Format a key-value line with consistent alignment

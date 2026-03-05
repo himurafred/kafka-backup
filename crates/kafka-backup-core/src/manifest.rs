@@ -839,7 +839,6 @@ pub struct DryRunReport {
 
 /// Per-topic dry-run report
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[non_exhaustive]
 pub struct DryRunTopicReport {
     /// Source topic name
     pub source_topic: String,
