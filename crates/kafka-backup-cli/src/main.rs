@@ -7,11 +7,13 @@ mod commands;
 #[derive(Parser)]
 #[command(name = "kafka-backup")]
 #[command(about = "High-performance Kafka backup and restore with point-in-time recovery")]
-#[command(long_about = "High-performance Kafka backup and restore with point-in-time recovery.\n\n\
+#[command(
+    long_about = "High-performance Kafka backup and restore with point-in-time recovery.\n\n\
     Back up Kafka topics to S3, Azure Blob, GCS, or local filesystem.\n\
     Restore with millisecond-precision PITR, topic remapping, and\n\
     automatic consumer group offset recovery.\n\n\
-    Documentation: https://osodevops.github.io/kafka-backup-docs/")]
+    Documentation: https://osodevops.github.io/kafka-backup-docs/"
+)]
 #[command(version)]
 struct Cli {
     #[command(subcommand)]
@@ -25,7 +27,9 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Back up Kafka topics to cloud storage or local filesystem
-    #[command(after_help = "Examples:\n  kafka-backup backup --config backup.yaml\n  kafka-backup backup -v --config backup.yaml   # with debug logging")]
+    #[command(
+        after_help = "Examples:\n  kafka-backup backup --config backup.yaml\n  kafka-backup backup -v --config backup.yaml   # with debug logging"
+    )]
     Backup {
         /// Path to the YAML configuration file
         #[arg(short, long)]
@@ -33,7 +37,9 @@ enum Commands {
     },
 
     /// Restore Kafka topics from a backup with optional PITR filtering
-    #[command(after_help = "Examples:\n  kafka-backup restore --config restore.yaml\n  kafka-backup validate-restore --config restore.yaml   # dry-run first")]
+    #[command(
+        after_help = "Examples:\n  kafka-backup restore --config restore.yaml\n  kafka-backup validate-restore --config restore.yaml   # dry-run first"
+    )]
     Restore {
         /// Path to the YAML configuration file
         #[arg(short, long)]
@@ -83,7 +89,9 @@ enum Commands {
     },
 
     /// Validate a backup's integrity (checksums, segment counts, manifests)
-    #[command(after_help = "Examples:\n  kafka-backup validate --path s3://bucket --backup-id my-backup\n  kafka-backup validate --path s3://bucket --backup-id my-backup --deep")]
+    #[command(
+        after_help = "Examples:\n  kafka-backup validate --path s3://bucket --backup-id my-backup\n  kafka-backup validate --path s3://bucket --backup-id my-backup --deep"
+    )]
     Validate {
         /// Storage path (local path or s3://bucket/prefix, azure://..., gcs://...)
         #[arg(short, long)]
@@ -146,11 +154,13 @@ enum Commands {
     },
 
     /// Run a complete restore with automatic consumer group offset recovery
-    #[command(long_about = "Run a complete restore with automatic consumer group offset recovery.\n\n\
+    #[command(
+        long_about = "Run a complete restore with automatic consumer group offset recovery.\n\n\
         Orchestrates three phases:\n  \
         1. Restore records to target cluster\n  \
         2. Collect source-to-target offset mapping\n  \
-        3. Reset consumer group offsets using the mapping")]
+        3. Reset consumer group offsets using the mapping"
+    )]
     ThreePhaseRestore {
         /// Path to the YAML configuration file
         #[arg(short, long)]
