@@ -520,7 +520,46 @@ ENTRYPOINT ["kafka-backup"]
 
 ---
 
-## Part 8: Dockerfile Best Practices Checklist
+## Part 8: Kubernetes Deployment Notes
+
+### Read-Only Root Filesystem
+
+When deploying with `readOnlyRootFilesystem: true` (recommended for security), the offset store needs a writable location. By default it uses `$TMPDIR` (`/tmp`), so mount a tmpfs or emptyDir there:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsNonRoot: true
+      containers:
+        - name: kafka-backup
+          image: osodevops/kafka-backup:v0.11.4
+          securityContext:
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+```
+
+For persistent offset tracking across pod restarts, mount a PVC or emptyDir at `/data` and set `offset_storage.db_path` in your config:
+
+```yaml
+offset_storage:
+  db_path: /data/offsets.db
+```
+
+> **Note:** The Docker image includes a `/data` directory owned by the `kafka-backup` user (uid 1000) for this purpose. Offset state is also synced to remote storage (S3/GCS/Azure) periodically, so local persistence is optional.
+
+---
+
+## Part 9: Dockerfile Best Practices Checklist
 
 ✅ **Do:**
 - [x] Multi-stage builds (separate builder from runtime)

@@ -12,9 +12,10 @@ Complete reference for all configuration options in Kafka Backup.
 4. [Target Configuration](#target-configuration)
 5. [Storage Configuration](#storage-configuration)
 6. [Backup Configuration](#backup-configuration)
-7. [Restore Configuration](#restore-configuration)
-8. [Environment Variables](#environment-variables)
-9. [CLI Arguments](#cli-arguments)
+7. [Offset Storage Configuration](#offset-storage-configuration)
+8. [Restore Configuration](#restore-configuration)
+9. [Environment Variables](#environment-variables)
+10. [CLI Arguments](#cli-arguments)
 
 ---
 
@@ -394,6 +395,69 @@ backup:
   include_offset_headers: true    # For offset remapping on restore
   checkpoint_interval_secs: 30
   segment_max_bytes: 134217728    # 128MB
+```
+
+---
+
+## Offset Storage Configuration
+
+Configuration for the local SQLite database used to track backup progress in continuous mode. This enables resumable backups after process restarts.
+
+| Option | Type | Required | Default | Description |
+|--------|------|----------|---------|-------------|
+| `offset_storage.backend` | string | No | `sqlite` | Storage backend: `sqlite` or `memory` |
+| `offset_storage.db_path` | string | No | `$TMPDIR/{backup_id}-offsets.db` | Path to local SQLite database file |
+| `offset_storage.s3_key` | string | No | - | Remote storage key for syncing the database |
+| `offset_storage.sync_interval_secs` | int | No | `30` | How often to sync the local DB to remote storage |
+
+The offset store is only created when `continuous: true` is set in backup options.
+
+### Default Behavior
+
+By default, the offset database is created in the system temp directory (`$TMPDIR` or `/tmp`). This works out of the box on most systems, including Kubernetes pods with `readOnlyRootFilesystem: true` (where `/tmp` is typically a tmpfs).
+
+### Kubernetes Deployment
+
+For Kubernetes pods with `readOnlyRootFilesystem: true`, ensure `/tmp` is writable by mounting an `emptyDir` volume:
+
+```yaml
+volumes:
+  - name: tmp
+    emptyDir: {}
+containers:
+  - name: kafka-backup
+    volumeMounts:
+      - name: tmp
+        mountPath: /tmp
+```
+
+For persistent offset tracking across pod restarts (optional — offsets are also synced to remote storage), mount a volume and configure `db_path`:
+
+```yaml
+# In your backup config
+offset_storage:
+  db_path: /data/offsets.db
+```
+
+```yaml
+# In your K8s pod spec
+volumes:
+  - name: data
+    emptyDir: {}
+containers:
+  - name: kafka-backup
+    volumeMounts:
+      - name: data
+        mountPath: /data
+```
+
+### Example
+
+```yaml
+offset_storage:
+  backend: sqlite
+  db_path: /data/my-backup-offsets.db
+  sync_interval_secs: 60
 ```
 
 ---
@@ -808,6 +872,10 @@ backup:
   continuous: true
   checkpoint_interval_secs: 30
   max_concurrent_partitions: 8
+
+# Optional: configure offset storage path (defaults to $TMPDIR)
+# offset_storage:
+#   db_path: /data/offsets.db
 ```
 
 ### Disaster Recovery Restore
