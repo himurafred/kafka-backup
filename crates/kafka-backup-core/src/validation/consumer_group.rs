@@ -38,12 +38,12 @@ impl ValidationCheck for ConsumerGroupOffsetCheck {
         // List all consumer groups on the restored cluster
         let groups = consumer_groups::list_groups(&ctx.target_client).await?;
 
-        let group_ids: Vec<String> = if self.config.verify_all_groups || self.config.groups.is_empty()
-        {
-            groups.iter().map(|g| g.group_id.clone()).collect()
-        } else {
-            self.config.groups.clone()
-        };
+        let group_ids: Vec<String> =
+            if self.config.verify_all_groups || self.config.groups.is_empty() {
+                groups.iter().map(|g| g.group_id.clone()).collect()
+            } else {
+                self.config.groups.clone()
+            };
 
         if group_ids.is_empty() {
             return Ok(ValidationResult {

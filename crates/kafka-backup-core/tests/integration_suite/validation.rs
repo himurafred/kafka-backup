@@ -22,7 +22,7 @@ use kafka_backup_core::config::{
     TopicSelection,
 };
 use kafka_backup_core::evidence::report::{
-    BackupInfo, EvidenceReport, IntegrityInfo, RestoreInfo, ToolInfo, hex_encode,
+    hex_encode, BackupInfo, EvidenceReport, IntegrityInfo, RestoreInfo, ToolInfo,
 };
 use kafka_backup_core::evidence::{pdf, signing};
 use kafka_backup_core::manifest::BackupManifest;
@@ -124,7 +124,10 @@ async fn run_restore(config: Config) -> anyhow::Result<kafka_backup_core::manife
     }
 }
 
-async fn load_manifest(storage_path: &std::path::Path, backup_id: &str) -> anyhow::Result<BackupManifest> {
+async fn load_manifest(
+    storage_path: &std::path::Path,
+    backup_id: &str,
+) -> anyhow::Result<BackupManifest> {
     let manifest_path = storage_path.join(backup_id).join("manifest.json");
     let data = tokio::fs::read(&manifest_path).await?;
     Ok(serde_json::from_slice(&data)?)
@@ -142,7 +145,10 @@ async fn run_validation(
     };
     let storage = create_backend(&storage_config)?;
     let client = cluster.create_client();
-    client.connect().await.map_err(|e| anyhow::anyhow!("Connect failed: {e}"))?;
+    client
+        .connect()
+        .await
+        .map_err(|e| anyhow::anyhow!("Connect failed: {e}"))?;
 
     let ctx = ValidationContext {
         backup_id: backup_id.to_string(),
@@ -222,7 +228,10 @@ async fn test_validation_message_count_after_restore() {
         vec![(source_topic.to_string(), restored_topic.to_string())],
     );
     let report = run_restore(restore_config).await.expect("Restore failed");
-    println!("Restore report: {} records restored", report.records_restored);
+    println!(
+        "Restore report: {} records restored",
+        report.records_restored
+    );
     sleep(Duration::from_secs(2)).await;
 
     // Validate — run MessageCountCheck against the RESTORED topic
@@ -278,7 +287,10 @@ async fn test_validation_message_count_after_restore() {
         CheckOutcome::Passed,
         "All validation checks should pass"
     );
-    assert_eq!(summary.checks_passed, 2, "MessageCount + OffsetRange should pass");
+    assert_eq!(
+        summary.checks_passed, 2,
+        "MessageCount + OffsetRange should pass"
+    );
     assert_eq!(summary.checks_failed, 0);
 }
 
@@ -384,11 +396,9 @@ async fn test_evidence_report_generation_and_signing() {
         .await
         .expect("Manifest load failed");
 
-    let manifest_bytes = tokio::fs::read(
-        temp_dir.path().join(backup_id).join("manifest.json"),
-    )
-    .await
-    .expect("read manifest");
+    let manifest_bytes = tokio::fs::read(temp_dir.path().join(backup_id).join("manifest.json"))
+        .await
+        .expect("read manifest");
     let manifest_sha256 = {
         use sha2::{Digest, Sha256};
         let mut h = Sha256::new();
@@ -397,7 +407,11 @@ async fn test_evidence_report_generation_and_signing() {
     };
 
     // Build evidence report
-    let check_names: Vec<String> = summary.results.iter().map(|r| r.check_name.clone()).collect();
+    let check_names: Vec<String> = summary
+        .results
+        .iter()
+        .map(|r| r.check_name.clone())
+        .collect();
     let report = EvidenceReport {
         schema_version: "1.0".to_string(),
         report_id: "test-evidence-run-001".to_string(),
@@ -465,8 +479,7 @@ async fn test_evidence_report_generation_and_signing() {
         signing::sign_report(&json1, private_pem.as_str(), &report.report_id).expect("sign");
     assert_eq!(bundle.algorithm, "ECDSA-P256-SHA256");
 
-    let valid =
-        signing::verify_report(&json1, &bundle, &public_pem).expect("verify");
+    let valid = signing::verify_report(&json1, &bundle, &public_pem).expect("verify");
     assert!(valid, "Signature should verify against original data");
 
     // Tampered data should fail
@@ -553,7 +566,10 @@ async fn test_evidence_pdf_generation() {
             signed_by: None,
         },
         compliance_mappings: EvidenceReport::build_compliance_mappings(
-            &["MessageCountCheck".to_string(), "OffsetRangeCheck".to_string()],
+            &[
+                "MessageCountCheck".to_string(),
+                "OffsetRangeCheck".to_string(),
+            ],
             2555,
             None,
         ),
@@ -673,20 +689,22 @@ async fn test_evidence_upload_to_storage() {
     )
     .await
     .expect("list reports");
-    assert!(!reports.is_empty(), "Should find at least one evidence report");
+    assert!(
+        !reports.is_empty(),
+        "Should find at least one evidence report"
+    );
     assert!(
         reports.iter().any(|r| r.contains("storage-test-001")),
         "Should find our report in the listing"
     );
 
     // Verify it can be downloaded and parsed
-    let downloaded = kafka_backup_core::evidence::storage::download_evidence_report(
-        storage.as_ref(),
-        &key,
-    )
-    .await
-    .expect("download report");
-    let parsed: EvidenceReport = serde_json::from_slice(&downloaded).expect("parse downloaded report");
+    let downloaded =
+        kafka_backup_core::evidence::storage::download_evidence_report(storage.as_ref(), &key)
+            .await
+            .expect("download report");
+    let parsed: EvidenceReport =
+        serde_json::from_slice(&downloaded).expect("parse downloaded report");
     assert_eq!(parsed.report_id, "storage-test-001");
     assert_eq!(parsed.backup.id, backup_id);
 

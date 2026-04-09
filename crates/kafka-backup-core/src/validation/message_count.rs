@@ -42,17 +42,14 @@ impl ValidationCheck for MessageCountCheck {
 
         for topic_backup in &ctx.backup_manifest.topics {
             // Apply topic filter if configured
-            if !self.config.topics.is_empty()
-                && !self.config.topics.contains(&topic_backup.name)
-            {
+            if !self.config.topics.is_empty() && !self.config.topics.contains(&topic_backup.name) {
                 continue;
             }
 
             topics_verified += 1;
 
             for partition in &topic_backup.partitions {
-                let expected_count: i64 =
-                    partition.segments.iter().map(|s| s.record_count).sum();
+                let expected_count: i64 = partition.segments.iter().map(|s| s.record_count).sum();
                 total_expected += expected_count;
 
                 // Query the restored cluster for this partition's offset range

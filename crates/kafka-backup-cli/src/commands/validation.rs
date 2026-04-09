@@ -9,14 +9,13 @@ use uuid::Uuid;
 
 use kafka_backup_core::config::KafkaConfig;
 use kafka_backup_core::evidence::report::{
-    BackupInfo, EvidenceReport, IntegrityInfo, RestoreInfo, ToolInfo,
-    hex_encode,
+    hex_encode, BackupInfo, EvidenceReport, IntegrityInfo, RestoreInfo, ToolInfo,
 };
 use kafka_backup_core::evidence::{pdf, signing, storage as evidence_storage};
 use kafka_backup_core::kafka::KafkaClient;
 use kafka_backup_core::manifest::BackupManifest;
-use kafka_backup_core::notification::slack::SlackNotifier;
 use kafka_backup_core::notification::pagerduty::PagerDutyNotifier;
+use kafka_backup_core::notification::slack::SlackNotifier;
 use kafka_backup_core::notification::NotificationSender;
 use kafka_backup_core::storage::create_backend;
 use kafka_backup_core::validation::config::{EvidenceFormat, ValidationConfig};
@@ -27,8 +26,8 @@ use kafka_backup_core::validation::{CheckOutcome, ValidationRunner};
 pub async fn run(config_path: &str, pitr: Option<i64>, triggered_by: Option<&str>) -> Result<()> {
     let config_data = std::fs::read_to_string(config_path)
         .with_context(|| format!("Failed to read config file: {config_path}"))?;
-    let mut config: ValidationConfig = serde_yaml::from_str(&config_data)
-        .with_context(|| "Failed to parse validation config")?;
+    let mut config: ValidationConfig =
+        serde_yaml::from_str(&config_data).with_context(|| "Failed to parse validation config")?;
 
     // Override from CLI args
     if let Some(ts) = pitr {
@@ -46,7 +45,9 @@ pub async fn run(config_path: &str, pitr: Option<i64>, triggered_by: Option<&str
 
     // Load backup manifest
     let manifest_key = format!("{}/manifest.json", config.backup_id);
-    let manifest_bytes = storage.get(&manifest_key).await
+    let manifest_bytes = storage
+        .get(&manifest_key)
+        .await
         .with_context(|| format!("Failed to load manifest from {manifest_key}"))?;
     let manifest: BackupManifest = serde_json::from_slice(&manifest_bytes)
         .with_context(|| "Failed to parse backup manifest")?;
@@ -92,11 +93,18 @@ pub async fn run(config_path: &str, pitr: Option<i64>, triggered_by: Option<&str
     println!("Duration: {}ms\n", summary.total_duration_ms);
 
     for result in &summary.results {
-        println!("  [{}] {} — {}", result.outcome, result.check_name, result.detail);
+        println!(
+            "  [{}] {} — {}",
+            result.outcome, result.check_name, result.detail
+        );
     }
 
     // Build evidence report
-    let check_names: Vec<String> = summary.results.iter().map(|r| r.check_name.clone()).collect();
+    let check_names: Vec<String> = summary
+        .results
+        .iter()
+        .map(|r| r.check_name.clone())
+        .collect();
     let total_partitions: usize = manifest.topics.iter().map(|t| t.partitions.len()).sum();
 
     let compliance = EvidenceReport::build_compliance_mappings(
@@ -148,9 +156,11 @@ pub async fn run(config_path: &str, pitr: Option<i64>, triggered_by: Option<&str
     };
 
     // Compute report SHA-256
-    let canonical = report.to_canonical_json()
+    let canonical = report
+        .to_canonical_json()
         .map_err(|e| anyhow::anyhow!("Failed to serialize report: {e}"))?;
-    let report_digest = report.sha256_digest()
+    let report_digest = report
+        .sha256_digest()
         .map_err(|e| anyhow::anyhow!("Failed to compute report hash: {e}"))?;
     report.integrity.report_sha256 = hex_encode(&report_digest);
 
@@ -163,7 +173,8 @@ pub async fn run(config_path: &str, pitr: Option<i64>, triggered_by: Option<&str
         let json_bytes = if config.evidence.signing.enabled {
             canonical.clone()
         } else {
-            report.to_pretty_json()
+            report
+                .to_pretty_json()
                 .map_err(|e| anyhow::anyhow!("Failed to serialize report: {e}"))?
         };
         let key = evidence_storage::upload_evidence_json(
@@ -245,7 +256,8 @@ pub async fn evidence_list(path: &str, limit: usize) -> Result<()> {
     let storage_config = kafka_backup_core::storage::StorageBackendConfig::from_url(path)?;
     let storage = create_backend(&storage_config)?;
 
-    let reports = evidence_storage::list_evidence_reports(storage.as_ref(), "evidence-reports/").await?;
+    let reports =
+        evidence_storage::list_evidence_reports(storage.as_ref(), "evidence-reports/").await?;
 
     if reports.is_empty() {
         println!("No evidence reports found.");
@@ -343,7 +355,9 @@ pub async fn evidence_verify(
 
 async fn create_kafka_client(config: &KafkaConfig) -> Result<KafkaClient> {
     let client = KafkaClient::new(config.clone());
-    client.connect().await
+    client
+        .connect()
+        .await
         .with_context(|| "Failed to connect to target Kafka cluster")?;
     Ok(client)
 }

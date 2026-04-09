@@ -130,8 +130,12 @@ impl ValidationRunner {
                 Ok(result) => {
                     match result.outcome {
                         CheckOutcome::Passed => info!(check = check.name(), "Check passed"),
-                        CheckOutcome::Failed => warn!(check = check.name(), detail = %result.detail, "Check FAILED"),
-                        CheckOutcome::Warning => warn!(check = check.name(), detail = %result.detail, "Check warning"),
+                        CheckOutcome::Failed => {
+                            warn!(check = check.name(), detail = %result.detail, "Check FAILED")
+                        }
+                        CheckOutcome::Warning => {
+                            warn!(check = check.name(), detail = %result.detail, "Check warning")
+                        }
                         CheckOutcome::Skipped => info!(check = check.name(), "Check skipped"),
                     }
                     results.push(result);
@@ -150,10 +154,22 @@ impl ValidationRunner {
         }
 
         let total_duration_ms = start.elapsed().as_millis() as u64;
-        let checks_passed = results.iter().filter(|r| r.outcome == CheckOutcome::Passed).count();
-        let checks_failed = results.iter().filter(|r| r.outcome == CheckOutcome::Failed).count();
-        let checks_skipped = results.iter().filter(|r| r.outcome == CheckOutcome::Skipped).count();
-        let checks_warned = results.iter().filter(|r| r.outcome == CheckOutcome::Warning).count();
+        let checks_passed = results
+            .iter()
+            .filter(|r| r.outcome == CheckOutcome::Passed)
+            .count();
+        let checks_failed = results
+            .iter()
+            .filter(|r| r.outcome == CheckOutcome::Failed)
+            .count();
+        let checks_skipped = results
+            .iter()
+            .filter(|r| r.outcome == CheckOutcome::Skipped)
+            .count();
+        let checks_warned = results
+            .iter()
+            .filter(|r| r.outcome == CheckOutcome::Warning)
+            .count();
 
         let overall_result = if checks_failed > 0 {
             CheckOutcome::Failed

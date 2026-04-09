@@ -42,7 +42,11 @@ impl SlackNotifier {
         Ok(())
     }
 
-    fn build_payload(report: &EvidenceReport, evidence_url: &str, emoji: &str) -> serde_json::Value {
+    fn build_payload(
+        report: &EvidenceReport,
+        evidence_url: &str,
+        emoji: &str,
+    ) -> serde_json::Value {
         let result_text = format!(
             "{emoji} Kafka Backup Validation {}",
             report.validation.overall_result

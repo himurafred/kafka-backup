@@ -135,9 +135,9 @@ impl EvidenceReport {
         // serde_json with sorted maps produces deterministic output.
         let value = serde_json::to_value(self)
             .map_err(|e| crate::Error::Evidence(format!("Failed to serialize report: {e}")))?;
-        let canonical =
-            serde_json::to_vec(&value)
-                .map_err(|e| crate::Error::Evidence(format!("Failed to produce canonical JSON: {e}")))?;
+        let canonical = serde_json::to_vec(&value).map_err(|e| {
+            crate::Error::Evidence(format!("Failed to produce canonical JSON: {e}"))
+        })?;
         Ok(canonical)
     }
 

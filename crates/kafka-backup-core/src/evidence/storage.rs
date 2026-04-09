@@ -79,10 +79,7 @@ pub async fn list_evidence_reports(
 }
 
 /// Download an evidence report (JSON) from object storage.
-pub async fn download_evidence_report(
-    storage: &dyn StorageBackend,
-    key: &str,
-) -> Result<Vec<u8>> {
+pub async fn download_evidence_report(storage: &dyn StorageBackend, key: &str) -> Result<Vec<u8>> {
     let data = storage.get(key).await?;
     Ok(data.to_vec())
 }
