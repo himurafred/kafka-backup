@@ -312,6 +312,8 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
+          fetch-depth: 0  # Full history needed for changelog generation
+          fetch-tags: true
       - name: Install cached dist
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -358,10 +360,56 @@ jobs:
           ANNOUNCEMENT_BODY: "${{ fromJson(steps.host.outputs.manifest).announcement_github_body }}"
           RELEASE_COMMIT: "${{ github.sha }}"
         run: |
-          # Write and read notes from a file to avoid quoting breaking things
-          echo "$ANNOUNCEMENT_BODY" > $RUNNER_TEMP/notes.txt
+          TAG="${{ needs.plan.outputs.tag }}"
 
-          gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
+          # Find the previous tag for changelog generation
+          PREV_TAG=$(git tag --sort=-v:refname | grep -A1 "^${TAG}$" | tail -1)
+          if [ "$PREV_TAG" = "$TAG" ] || [ -z "$PREV_TAG" ]; then
+            PREV_TAG=$(git rev-list --max-parents=0 HEAD | head -1)
+          fi
+          echo "Generating changelog: ${PREV_TAG}..${TAG}"
+
+          # Generate changelog grouped by conventional commit type
+          echo "## What's Changed" > $RUNNER_TEMP/notes.txt
+          echo "" >> $RUNNER_TEMP/notes.txt
+
+          FEATURES=$(git log "${PREV_TAG}..${TAG}" --oneline --grep="^feat" --format="* %s" 2>/dev/null | head -20)
+          if [ -n "$FEATURES" ]; then
+            echo "### Features" >> $RUNNER_TEMP/notes.txt
+            echo "$FEATURES" >> $RUNNER_TEMP/notes.txt
+            echo "" >> $RUNNER_TEMP/notes.txt
+          fi
+
+          FIXES=$(git log "${PREV_TAG}..${TAG}" --oneline --grep="^fix" --format="* %s" 2>/dev/null | head -20)
+          if [ -n "$FIXES" ]; then
+            echo "### Fixes" >> $RUNNER_TEMP/notes.txt
+            echo "$FIXES" >> $RUNNER_TEMP/notes.txt
+            echo "" >> $RUNNER_TEMP/notes.txt
+          fi
+
+          DEPS=$(git log "${PREV_TAG}..${TAG}" --oneline --grep="^deps\|^dep\|Bump" --format="* %s" 2>/dev/null | head -20)
+          if [ -n "$DEPS" ]; then
+            echo "### Dependencies" >> $RUNNER_TEMP/notes.txt
+            echo "$DEPS" >> $RUNNER_TEMP/notes.txt
+            echo "" >> $RUNNER_TEMP/notes.txt
+          fi
+
+          OTHER=$(git log "${PREV_TAG}..${TAG}" --oneline --grep="^ci\|^chore\|^style\|^refactor" --format="* %s" 2>/dev/null | head -20)
+          if [ -n "$OTHER" ]; then
+            echo "### Other" >> $RUNNER_TEMP/notes.txt
+            echo "$OTHER" >> $RUNNER_TEMP/notes.txt
+            echo "" >> $RUNNER_TEMP/notes.txt
+          fi
+
+          echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${TAG}" >> $RUNNER_TEMP/notes.txt
+          echo "" >> $RUNNER_TEMP/notes.txt
+          echo "---" >> $RUNNER_TEMP/notes.txt
+          echo "" >> $RUNNER_TEMP/notes.txt
+
+          # Append cargo-dist install instructions
+          echo "$ANNOUNCEMENT_BODY" >> $RUNNER_TEMP/notes.txt
+
+          gh release create "$TAG" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
 
   publish-homebrew-formula:
     needs:
