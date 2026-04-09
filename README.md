@@ -295,13 +295,15 @@ s3://kafka-backups/
     └── {backup_id}/
         ├── manifest.json           # Backup metadata
         ├── state/
-        │   └── offsets.db          # Checkpoint state
+        │   └── offsets.db          # Checkpoint state (synced from local)
         └── topics/
             └── {topic}/
                 └── partition={id}/
                     ├── segment-0001.zst
                     └── segment-0002.zst
 ```
+
+A local SQLite offset database is maintained at `$TMPDIR/{backup_id}-offsets.db` (configurable via `offset_storage.db_path`) and periodically synced to remote storage for durability.
 
 ## Metrics & Monitoring
 

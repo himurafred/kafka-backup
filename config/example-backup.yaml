@@ -50,3 +50,10 @@ backup:
 
   # Continuous mode (keep running and backing up new data)
   continuous: false  # true for continuous, false for one-shot
+
+# Offset storage (only used when continuous: true)
+# Tracks backup progress for resumable incremental backups.
+# Default: SQLite database in $TMPDIR (e.g. /tmp/backup-2025-01-15-001-offsets.db)
+# offset_storage:
+#   db_path: /data/offsets.db       # Custom path (useful for K8s volume mounts)
+#   sync_interval_secs: 30          # How often to sync to remote storage
