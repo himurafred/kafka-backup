@@ -312,6 +312,8 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
+          fetch-depth: 0  # Full history needed for changelog generation
+          fetch-tags: true
       - name: Install cached dist
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -351,17 +353,63 @@ jobs:
           rm -f artifacts/*-dist-manifest.json
       - name: Create GitHub Release
         env:
-          # Use PAT instead of GITHUB_TOKEN to avoid org-level restrictions
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          # Use PAT instead of GITHUB_TOKEN so downstream workflows can be triggered
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
           PRERELEASE_FLAG: "${{ fromJson(steps.host.outputs.manifest).announcement_is_prerelease && '--prerelease' || '' }}"
           ANNOUNCEMENT_TITLE: "${{ fromJson(steps.host.outputs.manifest).announcement_title }}"
           ANNOUNCEMENT_BODY: "${{ fromJson(steps.host.outputs.manifest).announcement_github_body }}"
           RELEASE_COMMIT: "${{ github.sha }}"
         run: |
-          # Write and read notes from a file to avoid quoting breaking things
-          echo "$ANNOUNCEMENT_BODY" > $RUNNER_TEMP/notes.txt
+          TAG="${{ needs.plan.outputs.tag }}"
 
-          gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
+          # Find the previous tag for changelog generation
+          PREV_TAG=$(git tag --sort=-v:refname | grep -A1 "^${TAG}$" | tail -1)
+          if [ "$PREV_TAG" = "$TAG" ] || [ -z "$PREV_TAG" ]; then
+            PREV_TAG=$(git rev-list --max-parents=0 HEAD | head -1)
+          fi
+          echo "Generating changelog: ${PREV_TAG}..${TAG}"
+
+          # Generate changelog grouped by conventional commit type
+          echo "## What's Changed" > $RUNNER_TEMP/notes.txt
+          echo "" >> $RUNNER_TEMP/notes.txt
+
+          FEATURES=$(git log "${PREV_TAG}..${TAG}" --oneline --grep="^feat" --format="* %s" 2>/dev/null | head -20)
+          if [ -n "$FEATURES" ]; then
+            echo "### Features" >> $RUNNER_TEMP/notes.txt
+            echo "$FEATURES" >> $RUNNER_TEMP/notes.txt
+            echo "" >> $RUNNER_TEMP/notes.txt
+          fi
+
+          FIXES=$(git log "${PREV_TAG}..${TAG}" --oneline --grep="^fix" --format="* %s" 2>/dev/null | head -20)
+          if [ -n "$FIXES" ]; then
+            echo "### Fixes" >> $RUNNER_TEMP/notes.txt
+            echo "$FIXES" >> $RUNNER_TEMP/notes.txt
+            echo "" >> $RUNNER_TEMP/notes.txt
+          fi
+
+          DEPS=$(git log "${PREV_TAG}..${TAG}" --oneline --grep="^deps\|^dep\|Bump" --format="* %s" 2>/dev/null | head -20)
+          if [ -n "$DEPS" ]; then
+            echo "### Dependencies" >> $RUNNER_TEMP/notes.txt
+            echo "$DEPS" >> $RUNNER_TEMP/notes.txt
+            echo "" >> $RUNNER_TEMP/notes.txt
+          fi
+
+          OTHER=$(git log "${PREV_TAG}..${TAG}" --oneline --grep="^ci\|^chore\|^style\|^refactor" --format="* %s" 2>/dev/null | head -20)
+          if [ -n "$OTHER" ]; then
+            echo "### Other" >> $RUNNER_TEMP/notes.txt
+            echo "$OTHER" >> $RUNNER_TEMP/notes.txt
+            echo "" >> $RUNNER_TEMP/notes.txt
+          fi
+
+          echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${TAG}" >> $RUNNER_TEMP/notes.txt
+          echo "" >> $RUNNER_TEMP/notes.txt
+          echo "---" >> $RUNNER_TEMP/notes.txt
+          echo "" >> $RUNNER_TEMP/notes.txt
+
+          # Append cargo-dist install instructions
+          echo "$ANNOUNCEMENT_BODY" >> $RUNNER_TEMP/notes.txt
+
+          gh release create "$TAG" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
 
   publish-homebrew-formula:
     needs:
@@ -427,16 +475,82 @@ jobs:
           event-type: update-manifest
           client-payload: '{"ref": "${{ github.ref }}", "sha": "${{ github.sha }}", "tag": "${{ needs.plan.outputs.tag }}"}'
 
+  # Build and push Docker image to Docker Hub
+  publish-docker:
+    needs:
+      - plan
+      - host
+    runs-on: ubuntu-latest
+    if: ${{ !github.event.pull_request && needs.host.result == 'success' }}
+    env:
+      REGISTRY: docker.io
+      IMAGE_NAME: osodevops/kafka-backup
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Build Docker image
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
+        with:
+          context: .
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test
+        run: |
+          docker run --rm ${{ env.IMAGE_NAME }}:test --version
+          docker run --rm ${{ env.IMAGE_NAME }}:test --help
+          echo "Docker smoke test passed"
+
+      - name: Push Docker image
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Update Docker Hub description
+        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+          repository: osodevops/kafka-backup
+          readme-filepath: ./README.md
+
   announce:
     needs:
       - plan
       - host
       - publish-homebrew-formula
       - publish-scoop-manifest
+      - publish-docker
     # use "always() && ..." to allow us to wait for all publish jobs while
     # still allowing individual publish jobs to skip themselves (for prereleases).
     # "host" however must run to completion, no skipping allowed!
-    if: ${{ always() && needs.host.result == 'success' && (needs.publish-homebrew-formula.result == 'skipped' || needs.publish-homebrew-formula.result == 'success') && (needs.publish-scoop-manifest.result == 'skipped' || needs.publish-scoop-manifest.result == 'success') }}
+    if: ${{ always() && needs.host.result == 'success' && (needs.publish-homebrew-formula.result == 'skipped' || needs.publish-homebrew-formula.result == 'success') && (needs.publish-scoop-manifest.result == 'skipped' || needs.publish-scoop-manifest.result == 'success') && (needs.publish-docker.result == 'skipped' || needs.publish-docker.result == 'success') }}
     runs-on: "ubuntu-22.04"
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
