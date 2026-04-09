@@ -27,8 +27,17 @@ jobs:
       - name: Check if Cargo.toml was modified
         id: cargo-check
         run: |
-          # Get the files changed in the commit that triggered the workflow
-          CHANGED_FILES=$(git diff-tree --no-commit-id --name-only -r ${{ github.event.workflow_run.head_sha }})
+          # Get the files changed in the commit that triggered the workflow.
+          # For merge commits, diff-tree combined mode returns empty, so we
+          # compare against the first parent (main before the merge) instead.
+          COMMIT=${{ github.event.workflow_run.head_sha }}
+          if git rev-parse --verify "${COMMIT}^2" >/dev/null 2>&1; then
+            echo "Merge commit detected — comparing against first parent"
+            CHANGED_FILES=$(git diff --name-only "${COMMIT}^1" "${COMMIT}")
+          else
+            CHANGED_FILES=$(git diff-tree --no-commit-id --name-only -r "${COMMIT}")
+          fi
+          echo "Changed files: $CHANGED_FILES"
           if echo "$CHANGED_FILES" | grep -q "^Cargo.toml$"; then
             echo "modified=true" >> $GITHUB_OUTPUT
             echo "Cargo.toml was modified in this commit"
