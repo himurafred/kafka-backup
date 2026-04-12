@@ -431,6 +431,17 @@ pub struct BackupOptions {
     /// Default: 100ms (was hardcoded to 1000ms)
     #[serde(default = "default_poll_interval_ms")]
     pub poll_interval_ms: u64,
+
+    /// Snapshot consumer group offsets to storage after each backup cycle.
+    ///
+    /// When `true`, the backup engine queries every broker for consumer groups,
+    /// fetches their committed offsets, filters to groups with offsets on
+    /// backed-up topics, and writes `{backup_id}/consumer-groups-snapshot.json`.
+    ///
+    /// This file is consumed by `auto_consumer_groups: true` at restore time.
+    /// Default: `false` — opt in explicitly to avoid unexpected overhead.
+    #[serde(default)]
+    pub consumer_group_snapshot: bool,
 }
 
 fn default_include_offset_headers() -> bool {
@@ -463,6 +474,7 @@ impl Default for BackupOptions {
             stop_at_current_offsets: false,
             max_concurrent_partitions: default_backup_max_concurrent_partitions(),
             poll_interval_ms: default_poll_interval_ms(),
+            consumer_group_snapshot: false,
         }
     }
 }
@@ -558,7 +570,7 @@ pub enum OffsetStrategy {
 }
 
 /// Restore-specific options
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RestoreOptions {
     /// Time window start (epoch milliseconds) for PITR
     #[serde(default)]
@@ -608,6 +620,26 @@ pub struct RestoreOptions {
     #[serde(default = "default_produce_batch_size")]
     pub produce_batch_size: usize,
 
+    /// Producer acknowledgement level sent to the broker.
+    ///
+    /// - `-1` (default): wait for all in-sync replicas — highest durability.
+    /// - `1`: wait for the partition leader only — lower latency on clusters with
+    ///   lagging replicas at the cost of reduced durability.
+    /// - `0`: fire-and-forget — fastest but no delivery guarantee.
+    ///
+    /// Change from `-1` only when restore speed is critical and the cluster
+    /// replication factor is known to be > 1 (Issue #67 bug 9).
+    #[serde(default = "default_produce_acks")]
+    pub produce_acks: i16,
+
+    /// Broker-side produce timeout in milliseconds (default: 30 000).
+    ///
+    /// The broker waits up to this duration for the required acks before
+    /// returning REQUEST_TIMED_OUT. The client-side socket timeout
+    /// (RESPONSE_TIMEOUT_SECS = 10 s) is a hard ceiling regardless.
+    #[serde(default = "default_produce_timeout_ms")]
+    pub produce_timeout_ms: i32,
+
     /// Checkpoint state file path for resumable restores
     #[serde(default)]
     pub checkpoint_state: Option<std::path::PathBuf>,
@@ -645,6 +677,65 @@ pub struct RestoreOptions {
     /// Mutually exclusive with `partition_mapping`.
     #[serde(default)]
     pub repartitioning: std::collections::HashMap<String, TopicRepartitioning>,
+
+    /// Purge target topics before restoring by advancing each partition's
+    /// log-start-offset to its current end-offset via the `DeleteRecords` API.
+    ///
+    /// This makes the topic appear empty without deleting it — required for
+    /// Strimzi-managed topics which cannot be deleted and recreated via the
+    /// standard Kafka admin API.
+    ///
+    /// **Irreversible.** Default: `false`.
+    #[serde(default)]
+    pub purge_topics: bool,
+
+    /// Automatically load the consumer-groups snapshot written by the backup
+    /// engine (or the `snapshot-groups` command) and use it to populate
+    /// `consumer_groups` before starting the restore.
+    ///
+    /// The snapshot is read from `{backup_id}/consumer-groups-snapshot.json`
+    /// in the configured storage backend. When the file is absent the option
+    /// is silently ignored and the restore continues without offset reset.
+    ///
+    /// Setting this also enables `reset_consumer_offsets` automatically.
+    /// Default: `false`.
+    #[serde(default)]
+    pub auto_consumer_groups: bool,
+}
+
+/// Hand-written `Default` so that `RestoreOptions::default()` in Rust code
+/// matches the serde defaults used when deserialising from YAML — the derived
+/// `Default` would give `0` for all numeric fields, which breaks callers that
+/// do `RestoreOptions { field: value, ..RestoreOptions::default() }`.
+impl Default for RestoreOptions {
+    fn default() -> Self {
+        Self {
+            time_window_start: None,
+            time_window_end: None,
+            source_partitions: None,
+            partition_mapping: Default::default(),
+            topic_mapping: Default::default(),
+            consumer_group_strategy: OffsetStrategy::default(),
+            dry_run: false,
+            include_original_offset_header: false,
+            rate_limit_records_per_sec: None,
+            rate_limit_bytes_per_sec: None,
+            max_concurrent_partitions: default_max_concurrent_partitions(),
+            produce_batch_size: default_produce_batch_size(),
+            produce_acks: default_produce_acks(),
+            produce_timeout_ms: default_produce_timeout_ms(),
+            checkpoint_state: None,
+            checkpoint_interval_secs: default_restore_checkpoint_interval_secs(),
+            consumer_groups: Vec::new(),
+            reset_consumer_offsets: false,
+            offset_report: None,
+            create_topics: false,
+            default_replication_factor: None,
+            repartitioning: Default::default(),
+            purge_topics: false,
+            auto_consumer_groups: false,
+        }
+    }
 }
 
 fn default_max_concurrent_partitions() -> usize {
@@ -653,6 +744,24 @@ fn default_max_concurrent_partitions() -> usize {
 
 fn default_produce_batch_size() -> usize {
     1000
+}
+
+fn default_produce_acks() -> i16 {
+    -1 // acks=all — highest durability (safe default)
+}
+
+fn default_produce_timeout_ms() -> i32 {
+    30_000 // 30 seconds, matching the previous hardcoded value
+}
+
+/// Public accessor for integration tests that assert the default acks value.
+pub fn default_produce_acks_pub() -> i16 {
+    default_produce_acks()
+}
+
+/// Public accessor for integration tests that assert the default timeout value.
+pub fn default_produce_timeout_ms_pub() -> i32 {
+    default_produce_timeout_ms()
 }
 
 fn default_restore_checkpoint_interval_secs() -> u64 {
@@ -873,6 +982,8 @@ connection:
         RestoreOptions {
             max_concurrent_partitions: default_max_concurrent_partitions(),
             produce_batch_size: default_produce_batch_size(),
+            produce_acks: default_produce_acks(),
+            produce_timeout_ms: default_produce_timeout_ms(),
             checkpoint_interval_secs: default_restore_checkpoint_interval_secs(),
             ..RestoreOptions::default()
         }
