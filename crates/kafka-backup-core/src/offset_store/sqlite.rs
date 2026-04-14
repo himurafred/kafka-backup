@@ -285,6 +285,12 @@ impl OffsetStore for SqliteOffsetStore {
             *pool = new_pool;
         }
 
+        // Run schema migrations on the loaded database. The stored DB may have
+        // been created by an older version that is missing tables added later
+        // (e.g. backup_jobs). CREATE TABLE IF NOT EXISTS is idempotent so this
+        // is always safe to call.
+        self.initialize_schema().await?;
+
         info!("Loaded offset database from storage: {}", s3_key);
         Ok(true)
     }

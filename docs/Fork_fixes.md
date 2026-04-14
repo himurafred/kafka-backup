@@ -142,3 +142,37 @@ The `ConsumerGroupOffsetCheck` uses `ListGroups` / `OffsetFetch` which are forwa
 [PASSED] MessageCountCheck — 39 topics; 3638 messages expected, 3637 restored; 0 discrepancies
 [PASSED] OffsetRangeCheck  — 45 partitions checked; 45 passed; 0 issues
 ```
+
+---
+
+## Fix 3 — SQLite schema migration not run after loading offset DB from storage
+
+**Status:** Implemented — commit on `fix/auto-consumer-groups-phase3`  
+**Affected upstream version:** ≤ v0.11.4 (commit `91cedda`)
+
+### Root cause
+
+`load_from_storage()` downloads `offsets.db` from object storage and replaces the SQLite connection pool. However, `initialize_schema()` was **not called** on the newly loaded database.
+
+If the stored DB was created by an older binary (before the `backup_jobs` table was added), or if backup data was wiped from object storage while `offsets.db` was left behind, the next startup would fail immediately:
+
+```
+Error: Storage error: Backend error: error returned from database: (code: 1) no such table: backup_jobs
+[kafka-backup] WARNING: kafka-backup exited with code 0, restarting in 10s...
+```
+
+The pod would restart in a loop until the outdated/incomplete `offsets.db` was manually removed from storage.
+
+### Fix
+
+Call `initialize_schema()` after the pool is replaced in `load_from_storage()`. All DDL statements use `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`, making this call idempotent on up-to-date databases.
+
+#### File changed
+
+| File | Change |
+|------|--------|
+| `crates/kafka-backup-core/src/offset_store/sqlite.rs` | Call `self.initialize_schema().await?` after pool replacement in `load_from_storage()` |
+
+### Workaround (before rebuild)
+
+Delete `kafka-backup/offsets.db` from object storage when resetting backup data.
