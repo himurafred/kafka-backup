@@ -636,6 +636,19 @@ impl BackupEngine {
             }
         }
 
+        // Do not overwrite an existing snapshot with an empty one.
+        // This protects against losing group offsets when kafka-backup restarts
+        // before consuming applications have reconnected and committed offsets.
+        // If no previous snapshot exists, write the empty one (first-time setup).
+        if snapshot_groups.is_empty() {
+            let key = format!("{}/consumer-groups-snapshot.json", self.config.backup_id);
+            if self.storage.exists(&key).await.unwrap_or(false) {
+                debug!("Consumer group snapshot: no groups with committed offsets, preserving existing snapshot");
+                return Ok(());
+            }
+            debug!("Consumer group snapshot: no groups found, writing initial empty snapshot");
+        }
+
         let snapshot = Snapshot {
             snapshot_time: chrono::Utc::now().timestamp_millis(),
             groups: snapshot_groups,
